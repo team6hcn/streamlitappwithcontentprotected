@@ -1,6 +1,4 @@
-Here’s the updated `README.md` file with the new feature of sending confirmation emails upon login:
 
-```markdown
 # Streamlit Authentication App
 
 This is a simple Streamlit application that implements email-based login and token-based authentication. The app securely stores tokens in a CSV file and uses encrypted cookies to manage sessions. It also sends a confirmation email to users upon successful login with a link to verify their email.
@@ -143,6 +141,3 @@ This is a simple Streamlit application that implements email-based login and tok
 - **Invalid Token**: Ensure that the session token has not expired. If the token has expired, the user will be prompted to log in again.
 - **Cookie Issues**: Clear your browser cookies if you encounter any issues with the encrypted cookies.
 
-```
-
-This updated `README.md` includes information about the email verification functionality and how the app now interacts with users to send confirmation emails after login. Let me know if you'd like any further adjustments!
