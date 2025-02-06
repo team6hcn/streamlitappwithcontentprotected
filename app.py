@@ -5,6 +5,10 @@ import hashlib
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from streamlit_cookies_manager import EncryptedCookieManager
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import base64
 
 # Load environment variables
 load_dotenv()
@@ -17,6 +21,74 @@ TOKENS_CSV = "tokens.csv"
 cookies = EncryptedCookieManager(prefix="auth_", password=COOKIE_PASSWORD)
 if not cookies.ready():
     st.stop()
+
+
+def send_login_email(email, token, expiry_date):
+    """Send login email with a crypted link."""
+    base_url = os.getenv("BASE_URL")
+    creation_date = datetime.now().strftime("%d%m%Y")
+    hash_str = f"{email}{token}{expiry_date}{creation_date}"
+    encrypted_link = base64.urlsafe_b64encode(hash_str.encode()).decode()
+
+    # Use a query parameter instead of a path-based route
+    login_url = f"{base_url}/?verify={encrypted_link}"
+
+    subject = "Login Link"
+    body = f"Click the following link to log in: {login_url}"
+    
+    sender_email = os.getenv("SMTP_USER")
+    receiver_email = email
+    password = os.getenv("SMTP_PASSWORD")
+
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        with smtplib.SMTP(os.getenv("SMTP_SERVER"), os.getenv("SMTP_PORT")) as server:
+            server.starttls()
+            server.login(sender_email, password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+        print(f"Login email sent to {email} with link: {login_url}")  # Debugging
+    except Exception as e:
+        print(f"===========================>")
+        print(f"Login email sent to {email} with link: {login_url}")
+        print(f"Error sending email: {e}")
+
+
+def verify_login_link(encrypted_link):
+    """Verify login link and set cookie if valid."""
+    try:
+        print(f"encrypted_link : {encrypted_link}")
+        decoded_link = base64.urlsafe_b64decode(encrypted_link).decode()
+        print(f"decoded_link : {decoded_link}")
+
+        # Extract email first
+        email_end = decoded_link.find("@") + decoded_link[decoded_link.find("@"):].find(".") + 4  # Find end of email
+        email = decoded_link[:email_end]
+        token = decoded_link[email_end:email_end+64]  # SHA-256 is 64 chars
+        expiry_date = decoded_link[email_end+64:email_end+72]
+        creation_date = decoded_link[email_end+72:]
+
+        print(f"email : {email}")
+        print(f"token : {token}")
+        print(f"expiry_date : {expiry_date}")
+        print(f"creation_date : {creation_date}")
+        
+        if datetime.now() > datetime.strptime(expiry_date, "%d%m%Y"):
+            return False  # Token expired
+
+        # Set cookie and store token
+        cookies["auth_token"] = token
+        cookies.save()
+        store_token(email, token, expiry_date)  # ✅ Now, email is correctly defined!
+        return True
+    except Exception as e:
+        print(f"Error verifying link: {e}")
+        return False
+
 
 # Helper functions
 def load_users():
@@ -75,11 +147,8 @@ def login_flow(users):
         if email in users and users[email]:
             expiry_date = generate_expiry_date()
             token = compute_token(email, expiry_date)
-            store_token(email, token, expiry_date)
-            cookies["auth_token"] = token
-            cookies.save()
-            st.success("Login successful! Reloading...")
-            st.rerun()
+            send_login_email(email, token, expiry_date)
+            st.success("Login successful! Please check your email to verify.")
         else:
             st.error("Invalid or inactive email.")
 
@@ -118,10 +187,26 @@ def protected_content():
 def main():
     users = load_users()
     token = cookies.get("auth_token")
-    if token and validate_token(token):
+
+    # Check if the app was accessed with a verification query parameter
+    query_params = st.query_params  # New method in Streamlit >1.23
+    if "verify" in query_params:
+        encrypted_link = query_params["verify"]
+        if verify_login_link(encrypted_link):
+            st.success("Successfully logged in! You can now access your dashboard.")
+            #st.rerun()
+            del st.query_params["verify"]
+            # JavaScript for redirection after 3 seconds
+            base_url = os.getenv("BASE_URL", "http://localhost:8501")
+            st.markdown(f"[Go to Dashboard]({base_url})")
+        else:
+            st.error("Invalid or expired link.")
+
+    elif token and validate_token(token):
         protected_content()
     else:
         login_flow(users)
+
 
 
 if __name__ == "__main__":
